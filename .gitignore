@@ -61,3 +61,8 @@ next-env.d.ts
 
 # Local development
 .turbo
+/generated/prisma
+
+# Large database files
+db/cccanto-webdist.txt
+src/cedict_ts.u8

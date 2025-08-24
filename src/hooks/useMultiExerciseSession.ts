@@ -7,6 +7,8 @@ interface UseMultiExerciseSessionOptions {
   onSessionComplete?: (session: PracticeSession) => void
   onExerciseComplete?: (attempt: ExerciseAttempt) => void
   autoSave?: boolean
+  endlessMode?: boolean
+  onNeedMoreExercises?: () => Promise<Exercise[]>
 }
 
 interface UseMultiExerciseSessionReturn {
@@ -47,22 +49,30 @@ export function useMultiExerciseSession({
   exercises,
   onSessionComplete,
   onExerciseComplete,
-  autoSave = true
+  autoSave = true,
+  endlessMode = false,
+  onNeedMoreExercises
 }: UseMultiExerciseSessionOptions): UseMultiExerciseSessionReturn {
   const [currentSession, setCurrentSession] = useState<PracticeSession | null>(null)
   const [isActive, setIsActive] = useState(false)
+  const [allExercises, setAllExercises] = useState<Exercise[]>(exercises)
   const sessionStartTime = useRef<number>(0)
   const exerciseStartTime = useRef<number>(0)
   const autoSaveTimer = useRef<NodeJS.Timeout | null>(null)
 
+  // Update exercises when prop changes
+  useEffect(() => {
+    setAllExercises(exercises)
+  }, [exercises])
+
   // Current exercise and character
-  const currentExercise = currentSession ? exercises[currentSession.currentExerciseIndex] || null : null
+  const currentExercise = currentSession ? allExercises[currentSession.currentExerciseIndex] || null : null
   const currentCharacter = currentExercise && currentSession ? 
     currentExercise.characters[currentSession.currentCharacterIndex] || null : null
 
-  // Progress calculations
-  const sessionProgress = currentSession ? 
-    ((currentSession.currentExerciseIndex + (currentSession.currentCharacterIndex / (currentExercise?.characters.length || 1))) / exercises.length) * 100 : 0
+  // Progress calculations (for endless mode, don't calculate total progress)
+  const sessionProgress = currentSession && !endlessMode ? 
+    ((currentSession.currentExerciseIndex + (currentSession.currentCharacterIndex / (currentExercise?.characters.length || 1))) / allExercises.length) * 100 : 0
   
   const exerciseProgress = currentExercise && currentSession ? 
     (currentSession.currentCharacterIndex / currentExercise.characters.length) * 100 : 0
@@ -242,12 +252,36 @@ export function useMultiExerciseSession({
     return false
   }, [currentSession, currentExercise])
 
-  const nextExercise = useCallback((): boolean => {
+  const nextExercise = useCallback(async (): Promise<boolean> => {
     if (!currentSession) return false
     
     const nextExIndex = currentSession.currentExerciseIndex + 1
-    // Cycle back to beginning instead of ending session
-    const actualNextIndex = nextExIndex >= exercises.length ? 0 : nextExIndex
+    
+    // In endless mode, try to load more exercises if needed
+    if (endlessMode && nextExIndex >= allExercises.length) {
+      if (onNeedMoreExercises) {
+        try {
+          const newExercises = await onNeedMoreExercises()
+          if (newExercises.length > 0) {
+            setAllExercises(prev => [...prev, ...newExercises])
+            // Continue with next exercise
+            setCurrentSession(prev => prev ? {
+              ...prev,
+              currentExerciseIndex: nextExIndex,
+              currentCharacterIndex: 0
+            } : null)
+            exerciseStartTime.current = Date.now()
+            return true
+          }
+        } catch (error) {
+          console.error('Failed to load more exercises:', error)
+        }
+      }
+      // If we can't get more exercises in endless mode, cycle back
+    }
+    
+    // Cycle back to beginning if reached end or use next index
+    const actualNextIndex = nextExIndex >= allExercises.length ? 0 : nextExIndex
     
     setCurrentSession(prev => prev ? {
       ...prev,
@@ -256,7 +290,7 @@ export function useMultiExerciseSession({
     } : null)
     exerciseStartTime.current = Date.now()
     return true
-  }, [currentSession, exercises.length])
+  }, [currentSession, allExercises.length, endlessMode, onNeedMoreExercises])
 
   const previousCharacter = useCallback((): boolean => {
     if (!currentSession) return false

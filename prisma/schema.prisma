@@ -1,0 +1,169 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core character data with stroke information
+model Character {
+  id          String   @id @default(cuid())
+  traditional String   @unique
+  simplified  String?
+  jyutping    String
+  english     String
+  strokeCount Int      @map("stroke_count")
+  frequency   Int?     // Frequency ranking (1 = most common)
+  difficulty  Int      @default(1) // 1-5 difficulty rating
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  strokePatterns StrokePattern[]
+  exerciseCharacters ExerciseCharacter[]
+  userProgress UserProgress[]
+
+  @@map("characters")
+}
+
+// Individual stroke patterns for template matching
+model StrokePattern {
+  id           String   @id @default(cuid())
+  characterId  String   @map("character_id")
+  strokeOrder  Int      @map("stroke_order")
+  pathData     Json     @map("path_data") // Array of {x, y, timestamp, pressure}
+  strokeType   String?  @map("stroke_type") // horizontal, vertical, left-falling, etc.
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, strokeOrder])
+  @@map("stroke_patterns")
+}
+
+// Practice exercises (can contain single characters or phrases)
+model Exercise {
+  id          String   @id @default(cuid())
+  type        String   // 'character' or 'phrase'
+  title       String
+  description String?
+  difficulty  Int      @default(1)
+  totalStrokes Int     @map("total_strokes")
+  
+  // For phrases
+  jyutping    String?
+  english     String?
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  exerciseCharacters ExerciseCharacter[]
+  practiceAttempts PracticeAttempt[]
+
+  @@map("exercises")
+}
+
+// Junction table for exercises and characters (supports phrases with multiple characters)
+model ExerciseCharacter {
+  id          String @id @default(cuid())
+  exerciseId  String @map("exercise_id")
+  characterId String @map("character_id")
+  orderIndex  Int    @map("order_index") // Order within the exercise (for phrases)
+
+  // Relations
+  exercise  Exercise  @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([exerciseId, characterId, orderIndex])
+  @@map("exercise_characters")
+}
+
+// User accounts (for future authentication)
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  isGuest   Boolean  @default(true) @map("is_guest")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  practiceSessions PracticeSession[]
+  userProgress UserProgress[]
+
+  @@map("users")
+}
+
+// Complete practice sessions containing multiple exercises
+model PracticeSession {
+  id                   String   @id @default(cuid())
+  userId               String   @map("user_id")
+  currentExerciseIndex Int      @default(0) @map("current_exercise_index")
+  currentCharacterIndex Int     @default(0) @map("current_character_index")
+  overallAccuracy      Float    @default(0) @map("overall_accuracy")
+  totalTimeSpent       Int      @default(0) @map("total_time_spent") // milliseconds
+  completed            Boolean  @default(false)
+  startedAt            DateTime @default(now()) @map("started_at")
+  completedAt          DateTime? @map("completed_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  practiceAttempts PracticeAttempt[]
+
+  @@map("practice_sessions")
+}
+
+// Individual exercise attempts within a practice session
+model PracticeAttempt {
+  id              String   @id @default(cuid())
+  sessionId       String   @map("session_id")
+  exerciseId      String   @map("exercise_id")
+  characterId     String?  @map("character_id") // For tracking specific characters in phrases
+  accuracy        Float    @default(0)
+  timeSpent       Int      @default(0) // milliseconds
+  completed       Boolean  @default(false)
+  attempts        Int      @default(1)
+  strokeData      Json?    @map("stroke_data") // Array of user strokes
+  canvasSnapshot  String?  @map("canvas_snapshot") // Base64 PNG snapshot
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  session  PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  @@map("practice_attempts")
+}
+
+// User progress and spaced repetition data
+model UserProgress {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  characterId     String   @map("character_id")
+  masteryLevel    Int      @default(0) // 0-5
+  difficultyLevel Int      @default(1) // 1-5 (prompt removal level)
+  accuracyHistory Json     @default("[]") @map("accuracy_history") // Array of recent scores
+  totalAttempts   Int      @default(0) @map("total_attempts")
+  streak          Int      @default(0) // Current streak of correct answers
+  lastPracticed   DateTime? @map("last_practiced")
+  nextReview      DateTime? @map("next_review") // Spaced repetition scheduling
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, characterId])
+  @@map("user_progress")
+}

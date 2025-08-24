@@ -5,11 +5,8 @@ import { useRouter } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import StrokeInsights from '@/components/StrokeInsights'
 import { useMultiExerciseSession } from '@/hooks/useMultiExerciseSession'
-import { exercises } from '@/data/exercises'
 import { PracticeSessionStorage } from '@/lib/strokeStorage'
 import type { UserStroke, Exercise, PracticeSession } from '@/types'
-
-// Use exercises from data file
 
 export default function PracticePage() {
   const router = useRouter()
@@ -27,6 +24,32 @@ export default function PracticePage() {
     show: boolean
   }>({ message: '', type: 'info', show: false })
   const [currentSnapshot, setCurrentSnapshot] = useState<string | null>(null)
+  const [exercises, setExercises] = useState<Exercise[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Load exercises from database
+  useEffect(() => {
+    async function loadExercises() {
+      try {
+        setLoading(true)
+        const response = await fetch('/api/exercises')
+        if (!response.ok) {
+          throw new Error('Failed to load exercises')
+        }
+        const data = await response.json()
+        setExercises(data.exercises || [])
+        console.log('Loaded exercises from database:', data.exercises?.length)
+      } catch (err) {
+        console.error('Error loading exercises:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load exercises')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadExercises()
+  }, [])
 
   // Ensure hydration consistency
   useEffect(() => {
@@ -153,6 +176,56 @@ export default function PracticePage() {
     if (currentAccuracy >= 80) {
       handleNext()
     }
+  }
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading exercises from database...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-600 text-xl mb-4">⚠️</div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Failed to Load Exercises</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Show empty state
+  if (exercises.length === 0) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-gray-400 text-xl mb-4">📚</div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">No Exercises Available</h2>
+          <p className="text-gray-600 mb-4">The database doesn't contain any practice exercises yet.</p>
+          <button 
+            onClick={() => router.push('/')}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            Back to Home
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
