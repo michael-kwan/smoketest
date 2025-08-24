@@ -11,6 +11,7 @@ interface DrawingCanvasProps {
   onClear?: () => void
   disabled?: boolean
   className?: string
+  onSnapshot?: (dataUrl: string) => void
 }
 
 export default function DrawingCanvas({
@@ -19,7 +20,8 @@ export default function DrawingCanvas({
   onStrokeComplete,
   onClear,
   disabled = false,
-  className = ''
+  className = '',
+  onSnapshot
 }: DrawingCanvasProps) {
   const windowSize = useWindowSize()
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -28,10 +30,11 @@ export default function DrawingCanvas({
   const [completedStrokes, setCompletedStrokes] = useState<UserStroke[]>([])
   const [startTime, setStartTime] = useState<number>(0)
 
-  // Calculate responsive canvas size
+  // Calculate responsive canvas size (always square)
+  const baseSize = width || (windowSize.width && windowSize.width < 768 ? Math.min(windowSize.width - 64, 300) : 300)
   const canvasSize = {
-    width: width || (windowSize.width && windowSize.width < 768 ? Math.min(windowSize.width - 64, 300) : 300),
-    height: height || (windowSize.width && windowSize.width < 768 ? Math.min(windowSize.width - 64, 300) : 300)
+    width: baseSize,
+    height: height || baseSize // Ensure square canvas
   }
 
   // Get canvas context and set up drawing properties
@@ -67,27 +70,33 @@ export default function DrawingCanvas({
 
   // Draw guide lines for Chinese character practice
   const drawGuideLines = useCallback(() => {
+    const canvas = canvasRef.current
     const ctx = getContext()
-    if (!ctx) return
+    if (!canvas || !ctx) return
     
-    ctx.strokeStyle = '#f0f0f0'
+    // Use actual canvas dimensions
+    const actualWidth = canvas.width
+    const actualHeight = canvas.height
+    
+    ctx.strokeStyle = '#e5e7eb' // Lighter gray
     ctx.lineWidth = 1
-    ctx.setLineDash([5, 5])
+    ctx.setLineDash([4, 4]) // Shorter dashes for better visibility
     
-    // Vertical center line
+    // Vertical center line - ensure it goes full height
     ctx.beginPath()
-    ctx.moveTo(canvasSize.width / 2, 0)
-    ctx.lineTo(canvasSize.width / 2, canvasSize.height)
+    ctx.moveTo(actualWidth / 2, 0)
+    ctx.lineTo(actualWidth / 2, actualHeight)
     ctx.stroke()
     
-    // Horizontal center line
+    // Horizontal center line - ensure it goes full width
     ctx.beginPath()
-    ctx.moveTo(0, canvasSize.height / 2)
-    ctx.lineTo(canvasSize.width, canvasSize.height / 2)
+    ctx.moveTo(0, actualHeight / 2)
+    ctx.lineTo(actualWidth, actualHeight / 2)
     ctx.stroke()
     
+    // Reset line dash
     ctx.setLineDash([])
-  }, [canvasSize, getContext])
+  }, [getContext])
 
   // Redraw all strokes
   const redrawCanvas = useCallback(() => {
@@ -95,9 +104,9 @@ export default function DrawingCanvas({
     const ctx = getContext()
     if (!canvas || !ctx) return
     
-    // Clear canvas
+    // Clear canvas using actual canvas dimensions
     ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, canvasSize.width, canvasSize.height)
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
     
     // Draw guide lines
     drawGuideLines()
@@ -127,7 +136,7 @@ export default function DrawingCanvas({
       }
       ctx.stroke()
     }
-  }, [canvasSize, completedStrokes, currentStroke, drawGuideLines, getContext])
+  }, [completedStrokes, currentStroke, drawGuideLines, getContext])
 
   // Handle pointer events
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -167,6 +176,15 @@ export default function DrawingCanvas({
     }
   }, [isDrawing, disabled, getPointerPos])
 
+  // Capture canvas snapshot
+  const captureSnapshot = useCallback(() => {
+    const canvas = canvasRef.current
+    if (canvas && onSnapshot) {
+      const dataUrl = canvas.toDataURL('image/png')
+      onSnapshot(dataUrl)
+    }
+  }, [onSnapshot])
+
   const handlePointerUp = useCallback(() => {
     if (!isDrawing || disabled) return
     
@@ -184,10 +202,13 @@ export default function DrawingCanvas({
       
       setCompletedStrokes(prev => [...prev, stroke])
       onStrokeComplete?.(stroke)
+      
+      // Capture snapshot after stroke completion
+      setTimeout(() => captureSnapshot(), 100)
     }
     
     setCurrentStroke([])
-  }, [isDrawing, disabled, currentStroke, startTime, onStrokeComplete])
+  }, [isDrawing, disabled, currentStroke, startTime, onStrokeComplete, captureSnapshot])
 
   // Clear all strokes
   const handleClear = useCallback(() => {
@@ -195,8 +216,8 @@ export default function DrawingCanvas({
     setCurrentStroke([])
     setIsDrawing(false)
     onClear?.()
-    redrawCanvas()
-  }, [onClear, redrawCanvas])
+    // Canvas will redraw automatically via useEffect when strokes change
+  }, [onClear])
 
   // Undo last stroke
   const handleUndo = useCallback(() => {
@@ -214,6 +235,8 @@ export default function DrawingCanvas({
   useEffect(() => {
     redrawCanvas()
   }, [completedStrokes, currentStroke, redrawCanvas])
+
+  // Canvas will clear automatically when component remounts due to key prop change
 
   // Prevent default touch behavior
   useEffect(() => {

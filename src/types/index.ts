@@ -11,6 +11,20 @@ export interface Character {
   strokes: Stroke[]
 }
 
+// Practice exercises - can be individual characters or phrases
+export interface Exercise {
+  id: string
+  type: 'character' | 'phrase'
+  title: string
+  description?: string
+  difficulty: number
+  characters: Character[]
+  totalStrokes: number
+  // For phrases
+  jyutping?: string
+  english?: string
+}
+
 export interface Stroke {
   id: number
   path: Point[]
@@ -31,7 +45,8 @@ export interface Point {
 // User progress and learning data
 export interface UserProgress {
   userId: string
-  characterId: string
+  exerciseId: string
+  characterId?: string // For individual character progress within an exercise
   masteryLevel: number // 0-5
   difficultyLevel: number // 1-5
   accuracy: number // 0-100
@@ -41,15 +56,32 @@ export interface UserProgress {
   streak: number
 }
 
+// Multi-exercise practice session
 export interface PracticeSession {
   id: string
   userId: string
-  characterId: string
+  exercises: Exercise[]
+  currentExerciseIndex: number
+  currentCharacterIndex: number // For multi-character exercises (phrases)
+  exerciseAttempts: ExerciseAttempt[]
+  overallAccuracy: number
+  totalTimeSpent: number
+  completed: boolean
+  startedAt: Date
+  completedAt?: Date
+}
+
+// Individual exercise attempt within a session
+export interface ExerciseAttempt {
+  exerciseId: string
+  characterId?: string // For tracking specific characters within phrases
   userStrokes: UserStroke[]
   accuracy: number
   timeSpent: number
   completed: boolean
+  attempts: number
   createdAt: Date
+  canvasSnapshot?: string // Base64 encoded PNG snapshot
 }
 
 export interface UserStroke {
