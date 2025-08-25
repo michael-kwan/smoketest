@@ -132,17 +132,54 @@ export class LearningProgressionSystem {
       return this.handleLevelCompletion()
     }
 
-    // Prioritize by difficulty (easier first) and frequency (more frequent first)
-    return availableCharacters
-      .sort((a, b) => {
-        const diffA = calculateDifficulty(getStrokeCount(a))
-        const diffB = calculateDifficulty(getStrokeCount(b))
-        if (diffA !== diffB) return diffA - diffB
+    // Group by difficulty for balanced selection
+    const charactersByDifficulty = new Map<number, string[]>()
+    
+    for (const char of availableCharacters) {
+      const difficulty = calculateDifficulty(getStrokeCount(char))
+      if (!charactersByDifficulty.has(difficulty)) {
+        charactersByDifficulty.set(difficulty, [])
+      }
+      charactersByDifficulty.get(difficulty)!.push(char)
+    }
+
+    // Get characters from each difficulty level, with some randomization
+    const selectedCharacters: string[] = []
+    const difficulties = Array.from(charactersByDifficulty.keys()).sort()
+    
+    // Prioritize easier characters but include some variety
+    for (const difficulty of difficulties) {
+      const chars = charactersByDifficulty.get(difficulty)!
+      
+      // Sort by frequency but add some randomization
+      const sortedChars = chars.sort((a, b) => {
+        const freqA = currentLevel.characters.indexOf(a)
+        const freqB = currentLevel.characters.indexOf(b)
         
-        // If same difficulty, prioritize by frequency (earlier in array = more frequent)
-        return currentLevel.characters.indexOf(a) - currentLevel.characters.indexOf(b)
+        // Add random factor to frequency sorting (80% frequency, 20% random)
+        const randomA = Math.random() * 0.2
+        const randomB = Math.random() * 0.2
+        
+        return (freqA * 0.8 + randomA) - (freqB * 0.8 + randomB)
       })
-      .slice(0, count)
+      
+      // Take characters from this difficulty level
+      const charsToTake = Math.min(sortedChars.length, Math.max(1, Math.floor(count / difficulties.length)))
+      selectedCharacters.push(...sortedChars.slice(0, charsToTake))
+      
+      if (selectedCharacters.length >= count) break
+    }
+
+    // If we need more characters, fill with remaining ones
+    if (selectedCharacters.length < count) {
+      const remaining = availableCharacters
+        .filter(char => !selectedCharacters.includes(char))
+        .sort((a, b) => currentLevel.characters.indexOf(a) - currentLevel.characters.indexOf(b))
+      
+      selectedCharacters.push(...remaining.slice(0, count - selectedCharacters.length))
+    }
+
+    return selectedCharacters.slice(0, count)
   }
 
   markCharacterCompleted(character: string, accuracy: number): void {

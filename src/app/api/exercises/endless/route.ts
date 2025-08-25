@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { DatabaseService } from '@/lib/database'
 import { learningProgression } from '@/lib/learningProgression'
 
+// Fisher-Yates shuffle algorithm
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  return shuffled
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -9,17 +19,20 @@ export async function GET(request: NextRequest) {
     const count = parseInt(searchParams.get('count') || '20')
     
     // Get exercises based on learning progression
-    const nextCharacters = learningProgression.getNextCharactersForPractice(count)
+    const nextCharacters = learningProgression.getNextCharactersForPractice(count * 2) // Get more to allow for shuffling
+    
+    // Shuffle the character list to make it unpredictable
+    const shuffledCharacters = shuffleArray(nextCharacters).slice(0, count)
     
     // Convert character list to exercises from database
     const exercises = []
     
-    for (const char of nextCharacters) {
+    for (const char of shuffledCharacters) {
       const character = await DatabaseService.getCharacterByTraditional(char)
       if (character) {
         // Create a dynamic exercise for this character
         exercises.push({
-          id: `endless-${char}-${Date.now()}`,
+          id: `endless-${char}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           type: 'character',
           title: `Practice: ${char}`,
           description: `Learn to write ${char} - ${character.english}`,
@@ -30,14 +43,17 @@ export async function GET(request: NextRequest) {
       }
     }
     
+    // Final shuffle of exercises to ensure randomness
+    const finalExercises = shuffleArray(exercises)
+    
     // Get progression stats
     const stats = learningProgression.getProgressionStats()
     
     return NextResponse.json({
-      exercises,
+      exercises: finalExercises,
       progression: stats,
       hasMore: true, // Always true for endless mode
-      totalAvailable: exercises.length
+      totalAvailable: finalExercises.length
     })
     
   } catch (error) {
