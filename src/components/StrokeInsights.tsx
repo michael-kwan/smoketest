@@ -2,7 +2,35 @@
 
 import { useState, useEffect } from 'react'
 import type { Character } from '@/types'
-import { StrokeAnalytics, type CharacterInsights, type SessionSummary } from '@/lib/strokeStorage'
+// Stroke analytics moved to database - simplified version
+
+// Simple types for basic insights
+interface CharacterInsights {
+  characterId: string
+  totalAttempts: number
+  averageAccuracy: number
+  charactersCompleted: number
+  bestAccuracy: number
+  worstAccuracy: number
+  totalTime: number
+  improvedSince: string
+  improvementTrend: number
+  recommendations: string[]
+}
+
+interface SessionSummary {
+  sessionId: string
+  characterId: string
+  totalStrokes: number
+  accuracy: number
+  totalTime: number
+  averageStrokeTime: number
+  averageStrokeLength: number
+  averageSpeed: number
+  strokeTypes: object
+  completed: boolean
+  timestamp: Date
+}
 
 interface StrokeInsightsProps {
   character: Character
@@ -18,9 +46,20 @@ export default function StrokeInsights({
   const [insights, setInsights] = useState<CharacterInsights | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // Load character insights
+  // Load character insights - simplified placeholder until database analytics are implemented
   useEffect(() => {
-    const characterInsights = StrokeAnalytics.generateCharacterInsights(character.id)
+    const characterInsights: CharacterInsights = {
+      characterId: character.id,
+      totalAttempts: 0,
+      averageAccuracy: 0,
+      charactersCompleted: 0,
+      bestAccuracy: 0,
+      worstAccuracy: 0,
+      totalTime: 0,
+      improvedSince: 'N/A',
+      improvementTrend: 0,
+      recommendations: []
+    }
     setInsights(characterInsights)
   }, [character.id, currentSession]) // Refresh when character changes OR session updates
 
@@ -83,7 +122,7 @@ export default function StrokeInsights({
                 {insights.charactersCompleted}
               </div>
               <div className="text-sm text-blue-600 mt-1">Times Completed</div>
-              <div className="text-xs text-gray-500 mt-1">How many times you've successfully practiced this character</div>
+              <div className="text-xs text-gray-500 mt-1">How many times you&apos;ve successfully practiced this character</div>
             </div>
             
             <div className="text-center p-4 bg-green-50 rounded-lg">

@@ -78,24 +78,24 @@ export default function DrawingCanvas({
     const actualWidth = canvas.width
     const actualHeight = canvas.height
     
+    ctx.save() // Save current context state
     ctx.strokeStyle = '#e5e7eb' // Lighter gray
     ctx.lineWidth = 1
     ctx.setLineDash([4, 4]) // Shorter dashes for better visibility
     
-    // Vertical center line - ensure it goes full height
+    // Vertical center line - ensure it goes full height, slightly inset from edges
     ctx.beginPath()
-    ctx.moveTo(actualWidth / 2, 0)
-    ctx.lineTo(actualWidth / 2, actualHeight)
+    ctx.moveTo(Math.floor(actualWidth / 2) + 0.5, 0.5)
+    ctx.lineTo(Math.floor(actualWidth / 2) + 0.5, actualHeight - 0.5)
     ctx.stroke()
     
-    // Horizontal center line - ensure it goes full width
+    // Horizontal center line - ensure it goes full width, slightly inset from edges  
     ctx.beginPath()
-    ctx.moveTo(0, actualHeight / 2)
-    ctx.lineTo(actualWidth, actualHeight / 2)
+    ctx.moveTo(0.5, Math.floor(actualHeight / 2) + 0.5)
+    ctx.lineTo(actualWidth - 0.5, Math.floor(actualHeight / 2) + 0.5)
     ctx.stroke()
     
-    // Reset line dash
-    ctx.setLineDash([])
+    ctx.restore() // Restore context state (includes resetting line dash)
   }, [getContext])
 
   // Redraw all strokes

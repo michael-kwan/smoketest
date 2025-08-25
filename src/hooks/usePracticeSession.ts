@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import type { PracticeSession, UserStroke, Character } from '@/types'
-import { PracticeSessionStorage, StrokeAnalytics, type SessionSummary } from '@/lib/strokeStorage'
+import type { PracticeSession, ExerciseAttempt, UserStroke, Character, Exercise } from '@/types'
+// Removed PracticeSessionStorage and StrokeAnalytics - data now handled by database
 
 interface UsePracticeSessionOptions {
   character: Character
@@ -19,7 +19,7 @@ interface UsePracticeSessionReturn {
   addStroke: (stroke: UserStroke) => void
   
   // Session data
-  sessionSummary: SessionSummary | null
+  sessionSummary: null // Analytics moved to database
   accuracy: number
   totalStrokes: number
   sessionDuration: number
@@ -44,15 +44,27 @@ export function usePracticeSession({
     const now = Date.now()
     sessionStartTime.current = now
     
+    // Create a single-character exercise
+    const singleCharExercise: Exercise = {
+      id: `exercise_${character.id}`,
+      type: 'character',
+      title: `Practice ${character.traditional}`,
+      difficulty: character.difficulty,
+      characters: [character],
+      totalStrokes: character.strokeCount
+    }
+    
     const session: PracticeSession = {
       id: `session_${now}_${character.id}`,
       userId: 'guest', // Will be replaced with real user ID later
-      characterId: character.id,
-      userStrokes: [],
-      accuracy: 0,
-      timeSpent: 0,
+      exercises: [singleCharExercise],
+      currentExerciseIndex: 0,
+      currentCharacterIndex: 0,
+      exerciseAttempts: [],
+      overallAccuracy: 0,
+      totalTimeSpent: 0,
       completed: false,
-      createdAt: new Date(now)
+      startedAt: new Date(now)
     }
     
     setCurrentSession(session)
@@ -70,17 +82,15 @@ export function usePracticeSession({
     
     const completedSession: PracticeSession = {
       ...currentSession,
-      timeSpent: duration,
-      completed: true
+      totalTimeSpent: duration,
+      completed: true,
+      completedAt: new Date(endTime)
     }
     
     setCurrentSession(completedSession)
     setIsActive(false)
     
-    // Save session
-    if (autoSave) {
-      PracticeSessionStorage.saveSession(completedSession)
-    }
+    // Session data is now saved to database via API calls, not localStorage
     
     // Notify completion callback
     onSessionComplete?.(completedSession)
@@ -92,27 +102,60 @@ export function usePracticeSession({
   const addStroke = useCallback((stroke: UserStroke) => {
     if (!currentSession || !isActive) return
     
-    const updatedSession: PracticeSession = {
-      ...currentSession,
-      userStrokes: [...currentSession.userStrokes, stroke],
-      timeSpent: Date.now() - sessionStartTime.current
+    const currentExercise = currentSession.exercises[0] // Single character exercise
+    const now = Date.now()
+    const duration = now - sessionStartTime.current
+    
+    // Find or create attempt for this character
+    const existingAttemptIndex = currentSession.exerciseAttempts.findIndex(attempt => 
+      attempt.exerciseId === currentExercise.id && attempt.characterId === character.id
+    )
+    
+    let updatedAttempts: ExerciseAttempt[]
+    
+    if (existingAttemptIndex >= 0) {
+      // Update existing attempt
+      const existingAttempt = currentSession.exerciseAttempts[existingAttemptIndex]
+      const updatedAttempt: ExerciseAttempt = {
+        ...existingAttempt,
+        userStrokes: [...existingAttempt.userStrokes, stroke],
+        timeSpent: duration,
+        accuracy: calculateStrokeAccuracy([...existingAttempt.userStrokes, stroke], character)
+      }
+      updatedAttempts = [...currentSession.exerciseAttempts]
+      updatedAttempts[existingAttemptIndex] = updatedAttempt
+    } else {
+      // Create new attempt
+      const newAttempt: ExerciseAttempt = {
+        exerciseId: currentExercise.id,
+        characterId: character.id,
+        userStrokes: [stroke],
+        accuracy: calculateStrokeAccuracy([stroke], character),
+        timeSpent: duration,
+        completed: false,
+        attempts: 1,
+        createdAt: new Date(now)
+      }
+      updatedAttempts = [...currentSession.exerciseAttempts, newAttempt]
     }
     
-    // Calculate accuracy (placeholder - will be improved with actual stroke validation)
-    const accuracy = calculateSessionAccuracy(updatedSession, character)
-    updatedSession.accuracy = accuracy
+    const updatedSession: PracticeSession = {
+      ...currentSession,
+      exerciseAttempts: updatedAttempts,
+      totalTimeSpent: duration
+    }
     
     setCurrentSession(updatedSession)
     
-    // Auto-save periodically
+    // Auto-save periodically (now saves to database via API)
     if (autoSave) {
       if (autoSaveTimer.current) {
         clearTimeout(autoSaveTimer.current)
       }
       
       autoSaveTimer.current = setTimeout(() => {
-        PracticeSessionStorage.saveSession(updatedSession)
-      }, 2000) // Save 2 seconds after last stroke
+        // Session data saved to database via API calls, not localStorage
+      }, 2000)
     }
   }, [currentSession, isActive, character, autoSave])
 
@@ -120,8 +163,8 @@ export function usePracticeSession({
   const saveSession = useCallback(() => {
     if (!currentSession) return
     
-    PracticeSessionStorage.saveSession(currentSession)
-    console.log('Session saved manually')
+    // Session data is now saved to database via API calls
+    console.log('Session data handled by database API')
   }, [currentSession])
 
   // Reset current session
@@ -135,15 +178,16 @@ export function usePracticeSession({
     sessionStartTime.current = 0
   }, [])
 
-  // Generate session summary
-  const sessionSummary = currentSession 
-    ? StrokeAnalytics.generateSessionSummary(currentSession)
-    : null
+  // Generate session summary - disabled for now since analytics moved to database
+  const sessionSummary = null
 
-  // Computed values
-  const accuracy = currentSession?.accuracy || 0
-  const totalStrokes = currentSession?.userStrokes.length || 0
-  const sessionDuration = currentSession?.timeSpent || 0
+  // Computed values from exercise attempts
+  const currentAttempt = currentSession?.exerciseAttempts.find(attempt => 
+    attempt.characterId === character.id
+  )
+  const accuracy = currentAttempt?.accuracy || 0
+  const totalStrokes = currentAttempt?.userStrokes.length || 0
+  const sessionDuration = currentSession?.totalTimeSpent || 0
 
   // Cleanup on unmount
   useEffect(() => {
@@ -159,11 +203,11 @@ export function usePracticeSession({
         
         const finalSession: PracticeSession = {
           ...currentSession,
-          timeSpent: duration,
+          totalTimeSpent: duration,
           completed: false // Mark as incomplete since user navigated away
         }
         
-        PracticeSessionStorage.saveSession(finalSession)
+        // Session data is now saved to database via API calls
       }
     }
   }, [currentSession, isActive, autoSave])
@@ -194,9 +238,7 @@ export function usePracticeSession({
  * Calculate session accuracy based on strokes and expected character
  * This is a placeholder implementation - will be enhanced with proper stroke validation
  */
-function calculateSessionAccuracy(session: PracticeSession, character: Character): number {
-  const { userStrokes } = session
-  
+function calculateStrokeAccuracy(userStrokes: UserStroke[], character: Character): number {
   if (userStrokes.length === 0) return 0
   
   // Basic accuracy calculation based on stroke count

@@ -2,7 +2,7 @@ import { PrismaClient } from '../generated/prisma'
 import * as fs from 'fs'
 import * as path from 'path'
 import { FREQUENCY_ORDERED_CHARACTERS, LEARNING_LEVELS } from '../src/lib/learningProgression'
-import { getStrokeCount, calculateDifficulty } from '../src/lib/strokeCount'
+import { getStrokeCount } from '../src/lib/strokeCount'
 
 const prisma = new PrismaClient()
 
@@ -304,6 +304,7 @@ async function main() {
   console.log('👤 Creating default user...')
   const defaultUser = await prisma.user.create({
     data: {
+      username: 'guest',
       email: 'guest@smoketest.app',
       name: 'Guest User',
       isGuest: true,

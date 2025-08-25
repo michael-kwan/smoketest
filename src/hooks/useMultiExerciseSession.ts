@@ -1,6 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import type { PracticeSession, ExerciseAttempt, UserStroke, Exercise, Character } from '@/types'
-import { PracticeSessionStorage } from '@/lib/strokeStorage'
+// Removed PracticeSessionStorage - all data goes to database
+
+// Generate UUID for sessions
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0
+    const v = c == 'x' ? r : (r & 0x3 | 0x8)
+    return v.toString(16)
+  })
+}
 
 interface UseMultiExerciseSessionOptions {
   exercises: Exercise[]
@@ -9,6 +18,7 @@ interface UseMultiExerciseSessionOptions {
   autoSave?: boolean
   endlessMode?: boolean
   onNeedMoreExercises?: () => Promise<Exercise[]>
+  username?: string // Username for saving attempts
 }
 
 interface UseMultiExerciseSessionReturn {
@@ -35,7 +45,7 @@ interface UseMultiExerciseSessionReturn {
   addStroke: (stroke: UserStroke) => void
   saveSnapshot: (dataUrl: string) => void
   nextCharacter: () => boolean // Returns true if more characters available
-  nextExercise: () => boolean // Returns true if more exercises available
+  nextExercise: () => Promise<boolean> // Returns true if more exercises available
   previousCharacter: () => boolean
   previousExercise: () => boolean
   
@@ -43,6 +53,10 @@ interface UseMultiExerciseSessionReturn {
   completeCurrentExercise: () => void
   skipExercise: () => void
   resetCurrentExercise: () => void
+  
+  // New functions for attempt tracking
+  saveAttempt: (accuracy: number, canvasSnapshot?: string) => Promise<void>
+  sessionUuid: string
 }
 
 export function useMultiExerciseSession({
@@ -51,11 +65,13 @@ export function useMultiExerciseSession({
   onExerciseComplete,
   autoSave = true,
   endlessMode = false,
-  onNeedMoreExercises
+  onNeedMoreExercises,
+  username = 'guest'
 }: UseMultiExerciseSessionOptions): UseMultiExerciseSessionReturn {
   const [currentSession, setCurrentSession] = useState<PracticeSession | null>(null)
   const [isActive, setIsActive] = useState(false)
   const [allExercises, setAllExercises] = useState<Exercise[]>(exercises)
+  const [sessionUuid] = useState<string>(() => generateUUID())
   const sessionStartTime = useRef<number>(0)
   const exerciseStartTime = useRef<number>(0)
   const autoSaveTimer = useRef<NodeJS.Timeout | null>(null)
@@ -134,7 +150,7 @@ export function useMultiExerciseSession({
     
     // Save session
     if (autoSave) {
-      PracticeSessionStorage.saveSession(completedSession)
+      // Session data saved to database via API, not localStorage
     }
     
     // Notify completion callback
@@ -201,7 +217,7 @@ export function useMultiExerciseSession({
       }
       
       autoSaveTimer.current = setTimeout(() => {
-        PracticeSessionStorage.saveSession(updatedSession)
+        // Session data saved to database via API calls, not localStorage
       }, 2000)
     }
   }, [currentSession, isActive, currentExercise, currentCharacter, autoSave])
@@ -230,7 +246,7 @@ export function useMultiExerciseSession({
       setCurrentSession(updatedSession)
       
       if (autoSave) {
-        PracticeSessionStorage.saveSession(updatedSession)
+        // Session data saved to database via API calls, not localStorage
       }
     }
   }, [currentSession, currentExercise, currentCharacter, autoSave])
@@ -389,7 +405,7 @@ export function useMultiExerciseSession({
           completed: false
         }
         
-        PracticeSessionStorage.saveSession(finalSession)
+        // Session data saved to database via API calls, not localStorage
       }
     }
   }, [currentSession, isActive, autoSave])
@@ -425,7 +441,50 @@ export function useMultiExerciseSession({
     // Exercise management
     completeCurrentExercise,
     skipExercise,
-    resetCurrentExercise
+    resetCurrentExercise,
+    
+    // New attempt tracking functions
+    saveAttempt: async (accuracy: number, canvasSnapshot?: string) => {
+      if (!currentCharacter || !currentExercise || !currentAttempt) return
+      
+      try {
+        const strokeVectors = currentAttempt.userStrokes.map(stroke => ({
+          path: stroke.path,
+          startTime: stroke.startTime,
+          endTime: stroke.endTime,
+          pressure: 0.5 // Default pressure value
+        }))
+
+        const response = await fetch('/api/attempts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username,
+            sessionUuid,
+            exerciseId: currentExercise.id,
+            characterId: currentCharacter.id,
+            accuracy,
+            timeSpent: currentAttempt.timeSpent,
+            strokeVectors,
+            canvasSnapshot,
+            difficultyLevel: currentExercise.difficulty,
+            exerciseType: currentExercise.type
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to save attempt')
+        }
+
+        const result = await response.json()
+        console.log('Attempt saved successfully:', result.attemptId)
+      } catch (error) {
+        console.error('Error saving attempt:', error)
+      }
+    },
+    sessionUuid
   }
 }
 

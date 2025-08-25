@@ -5,8 +5,34 @@ import { useRouter } from 'next/navigation'
 import DrawingCanvas from '@/components/DrawingCanvas'
 import StrokeInsights from '@/components/StrokeInsights'
 import { useMultiExerciseSession } from '@/hooks/useMultiExerciseSession'
-import { PracticeSessionStorage } from '@/lib/strokeStorage'
+// Removed PracticeSessionStorage - using database storage only
 import type { UserStroke, Exercise, PracticeSession } from '@/types'
+
+// Format exercise descriptions by parsing numbered lists and reducing clutter
+function formatExerciseDescription(description: string) {
+  // Remove level prefixes like "Level 1 - Basic Numbers: "
+  let cleaned = description.replace(/^Level \d+ - [^:]+:\s*/, '')
+  
+  // Parse numbered lists (1. 2. 3.) and convert to clean format
+  if (/\d+\./.test(cleaned)) {
+    const items = cleaned.split(/\d+\./).filter(item => item.trim())
+    if (items.length > 1) {
+      return (
+        <div className="space-y-1">
+          {items.map((item, index) => (
+            <div key={index} className="flex items-start gap-2">
+              <span className="text-indigo-600 font-medium text-xs">{index + 1}</span>
+              <span className="flex-1">{item.trim()}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+  }
+  
+  // For simple descriptions, just return cleaned text
+  return <span>{cleaned}</span>
+}
 
 export default function PracticePage() {
   const router = useRouter()
@@ -27,6 +53,30 @@ export default function PracticePage() {
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [username, setUsername] = useState<string>('guest')
+  
+  // Load username from localStorage on client and clean up old data
+  useEffect(() => {
+    // Clean up old localStorage data that might be causing quota issues
+    try {
+      const keys = Object.keys(localStorage)
+      keys.forEach(key => {
+        if (key.startsWith('smoketest_practice_sessions') || 
+            key.startsWith('smoketest_stroke_analytics') ||
+            key.startsWith('smoketest_user_progress')) {
+          localStorage.removeItem(key)
+        }
+      })
+    } catch (error) {
+      console.warn('Failed to clean up old localStorage data:', error)
+    }
+
+    // Load username only
+    const savedUsername = localStorage.getItem('smoketest-username')
+    if (savedUsername) {
+      setUsername(savedUsername)
+    }
+  }, [])
 
   // Load exercises from database
   useEffect(() => {
@@ -35,14 +85,21 @@ export default function PracticePage() {
         setLoading(true)
         const response = await fetch('/api/exercises')
         if (!response.ok) {
-          throw new Error('Failed to load exercises')
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+          throw new Error(errorData.error || `HTTP ${response.status}: Failed to load exercises`)
         }
         const data = await response.json()
         setExercises(data.exercises || [])
         console.log('Loaded exercises from database:', data.exercises?.length)
       } catch (err) {
         console.error('Error loading exercises:', err)
-        setError(err instanceof Error ? err.message : 'Failed to load exercises')
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load exercises'
+        setError(errorMessage)
+        
+        // Show helpful error message for common issues
+        if (errorMessage.includes('Database not configured')) {
+          setError('Database not configured. Please set up DATABASE_URL in your environment variables. See DATABASE.md for setup instructions.')
+        }
       } finally {
         setLoading(false)
       }
@@ -59,6 +116,7 @@ export default function PracticePage() {
   // Multi-exercise session management
   const session = useMultiExerciseSession({
     exercises,
+    username,
     onSessionComplete: (session: PracticeSession) => {
       console.log('Session completed:', session)
       alert(`Session completed!\nOverall accuracy: ${session.overallAccuracy.toFixed(1)}%\nTotal time: ${(session.totalTimeSpent / 1000 / 60).toFixed(1)} minutes`)
@@ -102,7 +160,7 @@ export default function PracticePage() {
       
       return () => clearTimeout(timer)
     }
-  }, [isClient, sessionStarted, startSession])
+  }, [isClient, sessionStarted, startSession, exercises.length])
 
   const handleStrokeComplete = useCallback((stroke: UserStroke) => {
     addStroke(stroke)
@@ -120,11 +178,19 @@ export default function PracticePage() {
     resetCurrentExercise()
   }, [resetCurrentExercise])
 
-  const handleCheckAnswer = () => {
+  const handleCheckAnswer = async () => {
     if (totalStrokes === 0) return
     
     const accuracy = currentAccuracy.toFixed(1)
     const expected = currentCharacter?.strokeCount || 0
+    
+    // Save attempt to database
+    try {
+      await session.saveAttempt(currentAccuracy, currentSnapshot || undefined)
+      console.log('Attempt saved to database successfully')
+    } catch (error) {
+      console.error('Failed to save attempt:', error)
+    }
     
     let message = `Accuracy: ${accuracy}% • Strokes: ${totalStrokes}/${expected}`
     let type: 'success' | 'error' | 'info' = 'info'
@@ -216,7 +282,7 @@ export default function PracticePage() {
         <div className="text-center">
           <div className="text-gray-400 text-xl mb-4">📚</div>
           <h2 className="text-xl font-semibold text-gray-900 mb-2">No Exercises Available</h2>
-          <p className="text-gray-600 mb-4">The database doesn't contain any practice exercises yet.</p>
+          <p className="text-gray-600 mb-4">The database doesn&apos;t contain any practice exercises yet.</p>
           <button 
             onClick={() => router.push('/')}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors"
@@ -243,21 +309,49 @@ export default function PracticePage() {
             <h1 className="text-xl font-semibold text-gray-900">
               Multi-Exercise Practice
             </h1>
-            <div className="text-sm text-gray-500">
-              {isClient && currentExercise ? 
-                `${currentExercise.type === 'phrase' ? 'Phrase' : 'Character'} ${currentExerciseIndex + 1}/${exercises.length}` +
-                (currentExercise.type === 'phrase' ? ` • Char ${currentCharacterIndex + 1}/${currentExercise.characters.length}` : '') :
-                'Loading...'
-              }
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-gray-500">
+                {isClient && currentExercise ? 
+                  `${currentExercise.type === 'phrase' ? 'Phrase' : 'Character'} ${currentExerciseIndex + 1}/${exercises.length}` +
+                  (currentExercise.type === 'phrase' ? ` • Char ${currentCharacterIndex + 1}/${currentExercise.characters.length}` : '') :
+                  'Loading...'
+                }
+              </div>
+              <div className="text-sm text-indigo-600">
+                User: {username}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-8">
+        {/* Username Input Section */}
+        <div className="bg-white rounded-xl p-6 shadow-sm mb-6">
+          <div className="flex items-center gap-4">
+            <label htmlFor="username" className="text-sm font-medium text-gray-700">
+              Username:
+            </label>
+            <input
+              id="username"
+              type="text"
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value)
+                localStorage.setItem('smoketest-username', e.target.value)
+              }}
+              placeholder="Enter your username"
+              className="flex-1 max-w-xs px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            />
+            <div className="text-sm text-gray-500">
+              Session: {session.sessionUuid.slice(0, 8)}...
+            </div>
+          </div>
+        </div>
+        
         <div className="grid lg:grid-cols-2 gap-8">
-          {/* Character Information */}
-          <div className="space-y-6">
+          {/* Character Information - Task Definition */}
+          <div className="space-y-6 order-1 lg:order-1">
             <div className="bg-white rounded-xl p-6 shadow-sm">
               {/* Exercise Header */}
               <div className="flex items-center justify-between mb-4">
@@ -266,7 +360,9 @@ export default function PracticePage() {
                     {isClient && currentExercise ? currentExercise.title : 'Loading...'}
                   </h2>
                   {currentExercise?.description && (
-                    <p className="text-sm text-gray-600 mt-1">{currentExercise.description}</p>
+                    <div className="text-sm text-gray-600 mt-1">
+                      {formatExerciseDescription(currentExercise.description)}
+                    </div>
                   )}
                 </div>
                 
@@ -433,74 +529,82 @@ export default function PracticePage() {
               </div>
             </div>
 
-            {/* Stroke Insights */}
-            {currentCharacter && (
-              <StrokeInsights 
-                character={currentCharacter}
-                currentSession={currentAttempt ? {
-                  sessionId: currentSession?.id || '',
-                  characterId: currentCharacter.id,
-                  totalStrokes,
-                  accuracy: currentAccuracy,
-                  totalTime: currentAttempt.timeSpent,
-                  averageStrokeTime: currentAttempt.timeSpent / Math.max(totalStrokes, 1),
-                  averageStrokeLength: 100, // placeholder
-                  averageSpeed: 0.5, // placeholder
-                  strokeTypes: {},
-                  completed: currentAttempt.completed,
-                  timestamp: currentAttempt.createdAt
-                } : null}
-                className="mb-6"
-              />
-            )}
+            {/* Show insights and stats on desktop only */}
+            <div className="hidden lg:block">
+              {/* Stroke Insights */}
+              {currentCharacter && (
+                <StrokeInsights 
+                  character={currentCharacter}
+                  currentSession={currentAttempt ? {
+                    sessionId: currentSession?.id || '',
+                    characterId: currentCharacter.id,
+                    totalStrokes,
+                    accuracy: currentAccuracy,
+                    totalTime: currentAttempt.timeSpent,
+                    averageStrokeTime: currentAttempt.timeSpent / Math.max(totalStrokes, 1),
+                    averageStrokeLength: 100, // placeholder
+                    averageSpeed: 0.5, // placeholder
+                    strokeTypes: {},
+                    completed: currentAttempt.completed,
+                    timestamp: currentAttempt.createdAt
+                  } : null}
+                  className="mb-6"
+                />
+              )}
 
-            {/* Practice Stats */}
-            {isActive && (
-              <div className="bg-white rounded-xl p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Practice Stats
-                </h3>
-                
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="text-center p-3 bg-indigo-50 rounded-lg">
-                    <div className="text-2xl font-bold text-indigo-700">
-                      {currentSession ? currentSession.exerciseAttempts.length : 0}
+              {/* Practice Stats */}
+              {isActive && (
+                <div className="bg-white rounded-xl p-6 shadow-sm">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Practice Stats
+                  </h3>
+                  
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="text-center p-3 bg-indigo-50 rounded-lg">
+                      <div className="text-2xl font-bold text-indigo-700">
+                        {currentSession ? currentSession.exerciseAttempts.length : 0}
+                      </div>
+                      <div className="text-sm text-indigo-600">Characters</div>
                     </div>
-                    <div className="text-sm text-indigo-600">Characters</div>
+                    
+                    <div className="text-center p-3 bg-green-50 rounded-lg">
+                      <div className="text-2xl font-bold text-green-700">
+                        {currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                          (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length).toFixed(1) :
+                          currentAccuracy.toFixed(1)}%
+                      </div>
+                      <div className="text-sm text-green-600">Avg Accuracy</div>
+                    </div>
                   </div>
                   
-                  <div className="text-center p-3 bg-green-50 rounded-lg">
-                    <div className="text-2xl font-bold text-green-700">
-                      {currentSession && currentSession.exerciseAttempts.length > 0 ? 
-                        (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length).toFixed(1) :
-                        currentAccuracy.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-green-600">Avg Accuracy</div>
+                  <div className="text-sm text-gray-600 text-center">
+                    {(currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                      (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                      currentAccuracy) >= 95 ? '🎉 Excellent!' :
+                     (currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                      (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                      currentAccuracy) >= 80 ? '👍 Good job!' :
+                     (currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                      (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                      currentAccuracy) >= 60 ? '📝 Keep practicing' :
+                     '💪 Try again'}
                   </div>
                 </div>
-                
-                <div className="text-sm text-gray-600 text-center">
-                  {(currentSession && currentSession.exerciseAttempts.length > 0 ? 
-                    (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
-                    currentAccuracy) >= 95 ? '🎉 Excellent!' :
-                   (currentSession && currentSession.exerciseAttempts.length > 0 ? 
-                    (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
-                    currentAccuracy) >= 80 ? '👍 Good job!' :
-                   (currentSession && currentSession.exerciseAttempts.length > 0 ? 
-                    (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
-                    currentAccuracy) >= 60 ? '📝 Keep practicing' :
-                   '💪 Try again'}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Drawing Canvas */}
-          <div className="space-y-6">
+          <div className="space-y-6 order-2 lg:order-2">
             <div className="bg-white rounded-xl p-6 shadow-sm">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Draw the Character
-              </h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Draw the Character
+                </h2>
+                <div className="text-sm text-gray-500">
+                  User: {username}
+                </div>
+              </div>
               
               <DrawingCanvas
                 key={`canvas-${currentExerciseIndex}-${currentCharacterIndex}-${sessionStarted}`}
@@ -573,7 +677,7 @@ export default function PracticePage() {
                     onClick={() => {
                       setSessionStarted(false)
                       endSession()
-                      PracticeSessionStorage.clearCurrentSession() // Clear analytics cache
+                      // Analytics data now stored in database, not localStorage
                       setTimeout(() => {
                         startSession()
                         setSessionStarted(true)
@@ -588,6 +692,70 @@ export default function PracticePage() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Mobile Analytics - Show after canvas on mobile */}
+        <div className="lg:hidden space-y-6 mt-8">
+          {/* Stroke Insights - Mobile */}
+          {currentCharacter && (
+            <StrokeInsights 
+              character={currentCharacter}
+              currentSession={currentAttempt ? {
+                sessionId: currentSession?.id || '',
+                characterId: currentCharacter.id,
+                totalStrokes,
+                accuracy: currentAccuracy,
+                totalTime: currentAttempt.timeSpent,
+                averageStrokeTime: currentAttempt.timeSpent / Math.max(totalStrokes, 1),
+                averageStrokeLength: 100, // placeholder
+                averageSpeed: 0.5, // placeholder
+                strokeTypes: {},
+                completed: currentAttempt.completed,
+                timestamp: currentAttempt.createdAt
+              } : null}
+              className="mb-6"
+            />
+          )}
+
+          {/* Practice Stats - Mobile */}
+          {isActive && (
+            <div className="bg-white rounded-xl p-6 shadow-sm">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Practice Stats
+              </h3>
+              
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="text-center p-3 bg-indigo-50 rounded-lg">
+                  <div className="text-2xl font-bold text-indigo-700">
+                    {currentSession ? currentSession.exerciseAttempts.length : 0}
+                  </div>
+                  <div className="text-sm text-indigo-600">Characters</div>
+                </div>
+                
+                <div className="text-center p-3 bg-green-50 rounded-lg">
+                  <div className="text-2xl font-bold text-green-700">
+                    {currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                      (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length).toFixed(1) :
+                      currentAccuracy.toFixed(1)}%
+                  </div>
+                  <div className="text-sm text-green-600">Avg Accuracy</div>
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-600 text-center">
+                {(currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                  (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                  currentAccuracy) >= 95 ? '🎉 Excellent!' :
+                 (currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                  (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                  currentAccuracy) >= 80 ? '👍 Good job!' :
+                 (currentSession && currentSession.exerciseAttempts.length > 0 ? 
+                  (currentSession.exerciseAttempts.reduce((sum, attempt) => sum + attempt.accuracy, 0) / currentSession.exerciseAttempts.length) :
+                  currentAccuracy) >= 60 ? '📝 Keep practicing' :
+                 '💪 Try again'}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

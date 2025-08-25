@@ -28,6 +28,7 @@ model Character {
   strokePatterns StrokePattern[]
   exerciseCharacters ExerciseCharacter[]
   userProgress UserProgress[]
+  practiceAttempts PracticeAttempt[]
 
   @@map("characters")
 }
@@ -86,25 +87,28 @@ model ExerciseCharacter {
   @@map("exercise_characters")
 }
 
-// User accounts (for future authentication)
+// User profiles with username-based system
 model User {
   id        String   @id @default(cuid())
+  username  String   @unique
   email     String?  @unique
   name      String?
-  isGuest   Boolean  @default(true) @map("is_guest")
+  isGuest   Boolean  @default(false) @map("is_guest")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   practiceSessions PracticeSession[]
   userProgress UserProgress[]
+  practiceAttempts PracticeAttempt[]
 
   @@map("users")
 }
 
-// Complete practice sessions containing multiple exercises
+// Complete practice sessions containing multiple exercises  
 model PracticeSession {
   id                   String   @id @default(cuid())
+  sessionUuid          String   @unique @default(cuid()) @map("session_uuid") // Unique session identifier
   userId               String   @map("user_id")
   currentExerciseIndex Int      @default(0) @map("current_exercise_index")
   currentCharacterIndex Int     @default(0) @map("current_character_index")
@@ -123,24 +127,36 @@ model PracticeSession {
   @@map("practice_sessions")
 }
 
-// Individual exercise attempts within a practice session
+// Individual practice attempts - each "Check Answer" creates one attempt
 model PracticeAttempt {
   id              String   @id @default(cuid())
-  sessionId       String   @map("session_id")
+  userId          String   @map("user_id")
+  sessionUuid     String   @map("session_uuid") // Links to practice session
   exerciseId      String   @map("exercise_id")
-  characterId     String?  @map("character_id") // For tracking specific characters in phrases
+  characterId     String   @map("character_id") // Which character was being practiced
+  
+  // Attempt data
   accuracy        Float    @default(0)
-  timeSpent       Int      @default(0) // milliseconds
-  completed       Boolean  @default(false)
-  attempts        Int      @default(1)
-  strokeData      Json?    @map("stroke_data") // Array of user strokes
-  canvasSnapshot  String?  @map("canvas_snapshot") // Base64 PNG snapshot
+  timeSpent       Int      @default(0) // milliseconds from start drawing to check answer
+  strokeCount     Int      @default(0) @map("stroke_count") // Number of strokes drawn
+  
+  // Stroke vector data - array of brushstroke paths with coordinates, pressure, timing
+  strokeVectors   Json     @map("stroke_vectors") // Detailed stroke data for analysis
+  canvasSnapshot  String?  @map("canvas_snapshot") // Base64 PNG snapshot of final drawing
+  
+  // Metadata
+  completed       Boolean  @default(true) // Whether attempt was completed (check answer pressed)
+  difficultyLevel Int      @default(1) @map("difficulty_level") // Learning level when attempted
+  exerciseType    String   @default("character") @map("exercise_type") // character or phrase
+  
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   // Relations
-  session  PracticeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session   PracticeSession @relation(fields: [sessionUuid], references: [sessionUuid], onDelete: Cascade)
+  exercise  Exercise  @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
 
   @@map("practice_attempts")
 }

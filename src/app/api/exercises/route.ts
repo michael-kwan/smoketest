@@ -13,6 +13,15 @@ function shuffleArray<T>(array: T[]): T[] {
 
 export async function GET() {
   try {
+    // Check if DATABASE_URL is configured
+    if (!process.env.DATABASE_URL) {
+      console.error('DATABASE_URL is not configured')
+      return NextResponse.json(
+        { error: 'Database not configured. Please set DATABASE_URL environment variable.' }, 
+        { status: 500 }
+      )
+    }
+
     const allExercises = await DatabaseService.getExercises()
     
     // Group exercises by difficulty level (which corresponds to learning levels)

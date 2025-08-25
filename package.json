@@ -10,7 +10,14 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma migrate reset --force && npm run db:seed"
+    "db:reset": "prisma migrate reset --force && npm run db:seed",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:api": "jest --testPathPattern=api",
+    "test:frontend": "jest --testPathPattern=frontend",
+    "test:integration": "jest --testPathPattern=integration",
+    "test:setup": "tsx tests/setup.ts"
   },
   "repository": {
     "type": "git",
@@ -45,6 +52,15 @@
     "typescript": "^5.9.2"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^29.5.14",
+    "@types/supertest": "^6.0.3",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "msw": "^2.10.5",
+    "supertest": "^6.3.4",
     "tsx": "^4.20.5"
   }
 }
